@@ -20,11 +20,10 @@ provider "helm" {
   }
 }
 
-
 # helm
-resource "kubernetes_namespace" "example" {
+resource "kubernetes_namespace" "ms-namespace" {
   metadata {
-    name = "argo"
+    name = "microservices"
   }
 }
 
@@ -34,3 +33,5 @@ resource "helm_release" "argocd" {
   repository = "https://argoproj.github.io/argo-helm"
   namespace = "argo"
 }
+
+//rds module
