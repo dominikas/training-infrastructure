@@ -31,17 +31,19 @@ data "aws_security_group" "default" {
 }
 
 resource "aws_db_instance" "postgres-db" {
-  allocated_storage = 20
+  engine               = "postgres"
+  engine_version       = "14"
+  instance_class       = "db.t4g.large"
+
+  allocated_storage     = 20
+  max_allocated_storage = 100
+
   storage_type      = "gp2"
-  engine            = "postgres"
-  engine_version    = "14"
-  instance_class    = "db.t2.micro"
   db_name           = var.postgres_database
-  identifier        = "microservices-mysql"
+  identifier        = "microservices-postgres"
 
   username             = var.postgres_user
   password             = var.postgres_password
-  parameter_group_name = "default.postgres.14"
 
   skip_final_snapshot = true
 
@@ -59,8 +61,8 @@ resource "aws_elasticache_cluster" "redis-db" {
   engine               = "redis"
   node_type            = "cache.m4.large"
   num_cache_nodes      = 1
-  parameter_group_name = "default.redis3.2"
-  engine_version       = "3.2.10"
+  parameter_group_name = "default.redis5.0"
+  engine_version       = "5.0.6"
   port                 = 6379
 
   subnet_group_name  = aws_elasticache_subnet_group.redis-subnet-group.name

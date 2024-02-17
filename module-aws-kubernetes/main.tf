@@ -2,13 +2,19 @@ provider "aws" {
   region = var.aws_region
 }
 
-# cluster access management
 locals {
   cluster_name = "${var.cluster_name}-${var.env_name}"
 }
 
+# EKS Cluster Resources
+#  * IAM Role to allow EKS service to manage other AWS services
+#  * EC2 Security Group to allow networking traffic with EKS cluster
+#  * EKS Cluster
+#
+
 resource "aws_iam_role" "ms-cluster" {
-  name               = local.cluster_name
+  name = local.cluster_name
+
   assume_role_policy = <<POLICY
 {
   "Version": "2012-10-17",
@@ -30,27 +36,37 @@ resource "aws_iam_role_policy_attachment" "ms-cluster-AmazonEKSClusterPolicy" {
   role       = aws_iam_role.ms-cluster.name
 }
 
-# network security policy
-
 resource "aws_security_group" "ms-cluster" {
-  name   = local.cluster_name
-  vpc_id = var.vpc_id
+  name        = local.cluster_name
+  description = "Cluster communication with worker nodes"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description = "Inbound traffic from within the security group"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    self        = true
+  }
 
   egress {
     from_port   = 0
-    protocol    = "-1"
     to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    self        = true
   }
+
   tags = {
     Name = "ms-up-running"
   }
 }
 
-# cluster definition
 resource "aws_eks_cluster" "ms-up-running" {
   name     = local.cluster_name
   role_arn = aws_iam_role.ms-cluster.arn
+
   vpc_config {
     security_group_ids = [aws_security_group.ms-cluster.id]
     subnet_ids         = var.cluster_subnet_ids
@@ -61,9 +77,16 @@ resource "aws_eks_cluster" "ms-up-running" {
   ]
 }
 
-# node role
+
+#
+# EKS Worker Nodes Resources
+#  * IAM role allowing Kubernetes actions to access other AWS services
+#  * EKS Node Group to launch worker nodes
+#
+
 resource "aws_iam_role" "ms-node" {
   name = "${local.cluster_name}.node"
+
   assume_role_policy = <<POLICY
 {
   "Version": "2012-10-17",
@@ -80,7 +103,6 @@ resource "aws_iam_role" "ms-node" {
 POLICY
 }
 
-# node policy
 resource "aws_iam_role_policy_attachment" "ms-node-AmazonEKSWorkerNodePolicy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
   role       = aws_iam_role.ms-node.name
@@ -91,36 +113,34 @@ resource "aws_iam_role_policy_attachment" "ms-node-AmazonEKS_CNI_Policy" {
   role       = aws_iam_role.ms-node.name
 }
 
-resource "aws_iam_role_policy_attachment" "ms-node-ContainerRegistryReadOnly" {
+resource "aws_iam_role_policy_attachment" "ms-node-AmazonEC2ContainerRegistryReadOnly" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
   role       = aws_iam_role.ms-node.name
 }
 
-# node group
-
 resource "aws_eks_node_group" "ms-node-group" {
-  cluster_name  = aws_eks_cluster.ms-up-running.name
+  cluster_name    = aws_eks_cluster.ms-up-running.name
   node_group_name = "microservices"
-  node_role_arn = aws_iam_role.ms-node.arn
-  subnet_ids    = var.nodegroup_subnet_ids
+  node_role_arn   = aws_iam_role.ms-node.arn
+  subnet_ids      = var.nodegroup_subnet_ids
+
   scaling_config {
     desired_size = var.nodegroup_desired_size
     max_size     = var.nodegroup_max_size
     min_size     = var.nodegroup_min_size
   }
 
-  disk_size = var.nodegroup_disk_size
+  disk_size      = var.nodegroup_disk_size
   instance_types = var.nodegroup_instance_types
 
   depends_on = [
-  aws_iam_role_policy_attachment.ms-node-AmazonEKSWorkerNodePolicy,
+    aws_iam_role_policy_attachment.ms-node-AmazonEKSWorkerNodePolicy,
     aws_iam_role_policy_attachment.ms-node-AmazonEKS_CNI_Policy,
-    aws_iam_role_policy_attachment.ms-node-ContainerRegistryReadOnly
+    aws_iam_role_policy_attachment.ms-node-AmazonEC2ContainerRegistryReadOnly,
   ]
 }
 
-# create a kubeconfig file
-
+# Create a kubeconfig file based on the cluster that has been created
 resource "local_file" "kubeconfig" {
   content  = <<KUBECONFIG
 apiVersion: v1
@@ -141,11 +161,12 @@ users:
 - name: ${aws_eks_cluster.ms-up-running.arn}
   user:
     exec:
-      apiVersion: client.authentication.k8s.io/v1alpha1
-      command: aws-iam-authenticator
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: aws
       args:
-        - "token"
-        - "-i"
+        - "eks"
+        - "get-token"
+        - "--cluster-name"
         - "${aws_eks_cluster.ms-up-running.name}"
     KUBECONFIG
   filename = "kubeconfig"

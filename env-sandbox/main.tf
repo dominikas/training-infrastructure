@@ -15,9 +15,13 @@ terraform {
 
     helm = {
       source  = "hashicorp/helm"
-      version = "= 2.5.1"
+      version = "= 2.12.1"
     }
 
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 5.33"
+    }
   }
 }
 
@@ -35,13 +39,13 @@ provider "aws" {
   region = local.aws_region
 }
 
-data "aws_eks_cluster" "msur"{
-  name = module.aws-eks.eks_cluster_id
+data "aws_eks_cluster" "msur" {
+  name = module.aws-kubernetes-cluster.eks_cluster_id
 }
 
 # Network configuration
 module "aws-network" {
-  source                = "github.com/dominikas/infrastructure-training/module-aws-network"
+  source                = "../module-aws-network"
   env_name              = local.env_name
   vpc_name              = "msur-VPC"
   cluster_name          = local.k8s_cluster_name
@@ -54,8 +58,9 @@ module "aws-network" {
 }
 
 # EKS Config
-module "aws-eks" {
-  source             = "github.com/dominikas/infrastructure-training/module-aws-kubernetes"
+module "aws-kubernetes-cluster" {
+  source             = "../module-aws-kubernetes"
+
   ms_namespace       = "microservices"
   env_name           = local.env_name
   aws_region         = local.aws_region
@@ -68,15 +73,54 @@ module "aws-eks" {
   nodegroup_instance_types = ["t3.medium"]
   nodegroup_desired_size   = 1
   nodegroup_min_size       = 1
-  nodegroup_max_size       = 2
+  nodegroup_max_size       = 5
+}
+
+provider "kubernetes" {
+  load_config_file       = false
+  cluster_ca_certificate = base64decode(data.aws_eks_cluster.msur.certificate_authority.0.data)
+  host                   = data.aws_eks_cluster.msur.endpoint
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = ["eks", "get-token", "--cluster-name", "${data.aws_eks_cluster.msur.name}"]
+  }
 }
 
 # GitOps Config
 module "argo-cd-server" {
-  source = "github.com/dominikas/infrastructure-training/module-argo-cd"
-  kubernetes_cluster_id = module.aws-eks.eks_cluster_id
-  kubernetes_cluster_name = module.aws-eks.eks_cluster_name
-  kubernetes_cluster_cert_data = module.aws-eks.eks_cluster_certificate_data
-  kubernetes_cluster_endpoint = module.aws-eks.eks_cluster_endpoint
-  eks_nodegroup_id = module.aws-eks.eks_cluster_nodegroup_id
+  source                       = "../module-argo-cd"
+  kubernetes_cluster_id        = module.aws-kubernetes-cluster.eks_cluster_id
+  kubernetes_cluster_name      = module.aws-kubernetes-cluster.eks_cluster_name
+  kubernetes_cluster_cert_data = module.aws-kubernetes-cluster.eks_cluster_certificate_data
+  kubernetes_cluster_endpoint  = module.aws-kubernetes-cluster.eks_cluster_endpoint
+  eks_nodegroup_id             = module.aws-kubernetes-cluster.eks_cluster_nodegroup_id
+}
+
+#Database config
+module "aws-databases" {
+  source = "../module-aws-db"
+
+  aws_region     = local.aws_region
+  postgres_password = var.postgres_password
+  vpc_id         = module.aws-network.vpc_id
+  eks_id         = data.aws_eks_cluster.msur.id
+  eks_sg_id      = module.aws-kubernetes-cluster.eks_cluster_security_group_id
+  subnet_a_id    = module.aws-network.private_subnet_ids[0]
+  subnet_b_id    = module.aws-network.private_subnet_ids[1]
+  env_name       = local.env_name
+  route53_id     = module.aws-network.route53_id
+}
+
+#Traefik config
+module "traefik" {
+  source = "../module-aws-traefik"
+
+  aws_region                   = local.env_name
+  kubernetes_cluster_id        = data.aws_eks_cluster.msur.id
+  kubernetes_cluster_name      = module.aws-kubernetes-cluster.eks_cluster_name
+  kubernetes_cluster_cert_data = module.aws-kubernetes-cluster.eks_cluster_certificate_data
+  kubernetes_cluster_endpoint  = module.aws-kubernetes-cluster.eks_cluster_endpoint
+
+  eks_nodegroup_id = module.aws-kubernetes-cluster.eks_cluster_nodegroup_id
 }

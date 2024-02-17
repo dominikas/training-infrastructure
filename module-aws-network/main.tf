@@ -165,3 +165,15 @@ resource "aws_route_table_association" "private-b-association" {
   subnet_id = aws_subnet.private-subnet-b.id
   route_table_id = aws_route_table.private-route-b.id
 }
+
+resource "aws_route53_zone" "private-zone" {
+  # AWS requires a lowercase name.
+  #name = "lower(${var.env_name}.${var.vpc_name}.com)"
+  name = "${var.env_name}.${var.vpc_name}.com"
+  #name = "testing.com"
+  force_destroy = true
+
+  vpc {
+    vpc_id = aws_vpc.main.id
+  }
+}

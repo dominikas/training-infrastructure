@@ -2,9 +2,9 @@ provider "kubernetes" {
   cluster_ca_certificate = base64decode(var.kubernetes_cluster_cert_data)
   host                   = var.kubernetes_cluster_endpoint
   exec {
-    api_version = "client.authentication.k8s.io/v1alpha1"
-    command     = "aws-iam-authenticator"
-    args        = ["token", "-i", "${var.kubernetes_cluster_name}"]
+    api_version = "client.authentication.k8s.io/v1beta1"
+    args        = ["eks", "get-token", "--cluster-name", "${var.kubernetes_cluster_name}"]
+    command     = "aws"
   }
 }
 
@@ -13,17 +13,18 @@ provider "helm" {
     cluster_ca_certificate = base64decode(var.kubernetes_cluster_cert_data)
     host                   = var.kubernetes_cluster_endpoint
     exec {
-      api_version = "client.authentication.k8s.io/v1alpha1"
-      command     = "aws-iam-authenticator"
-      args        = ["token", "-i", "${var.kubernetes_cluster_name}"]
+      api_version = "client.authentication.k8s.io/v1beta1"
+      args        = ["eks", "get-token", "--cluster-name", "${var.kubernetes_cluster_name}"]
+      command     = "aws"
     }
   }
 }
 
+
 # helm
-resource "kubernetes_namespace" "ms-namespace" {
+resource "kubernetes_namespace" "example" {
   metadata {
-    name = "microservices"
+    name = "argo"
   }
 }
 
@@ -33,5 +34,3 @@ resource "helm_release" "argocd" {
   repository = "https://argoproj.github.io/argo-helm"
   namespace = "argo"
 }
-
-//rds module
